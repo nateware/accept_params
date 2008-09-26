@@ -166,13 +166,13 @@ module AcceptParams
         if params.has_key?(child.name)
           recognized_keys << child.name
           validate_child(child, params[child.name])
-          validate_value_and_type_cast(child, params)
+          validate_value_and_type_cast!(child, params)
         elsif child.required?
           raise MissingParam, "Request params missing required parameter '#{child.canonical_name}'"
         else
           # For setting defaults on missing parameters
           recognized_keys << child.name
-          validate_value_and_type_cast(child, params)
+          validate_value_and_type_cast!(child, params)
         end
 
         # Finally, handle key renaming
@@ -204,7 +204,7 @@ module AcceptParams
       
     end
     
-    def validate_value_and_type_cast(child, params)
+    def validate_value_and_type_cast!(child, params)
       return true if child.namespace?
       value = params[child.name]
       if value.nil? # || value == ""
