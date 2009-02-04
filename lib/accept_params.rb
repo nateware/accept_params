@@ -28,7 +28,7 @@ module AcceptParams
   #   AcceptParams::ParamRules.ignore_params << "orientation"
   #
   mattr_accessor :ignore_params
-  @@ignore_params = %w( action controller commit format _method )
+  @@ignore_params = %w( action controller commit format _method authenticity_token )
 
   # The columns in ActiveRecord models that we should ignore by
   # default when expanding an is_a directive into a series of 
@@ -52,13 +52,18 @@ module AcceptParams
   @@ignore_columns = %w( id created_at updated_at created_on updated_on lock_version )
 
   # If unexpected params are encountered, default behavior is to raise an exception
+  # Setting this to true will instead just all them on through.  Note this defeats
+  # much of the purpose of the plugin. To mitigate security issues, try setting the
+  # next flag to "true" if you set this to true.
   mattr_accessor :ignore_unexpected
   @@ignore_unexpected = false
 
   # If unexpected params are encountered, remove them to prevent injection attacks.
-  # This is the concept behind whitelisting.
+  # Note: This is only relevant if you set ignore_unexpected to true, in which case
+  # you can have them removed (safer) by setting this. The basic idea is that then
+  # an exception won't be raised, but an attacker still won't be able to inject params.
   mattr_accessor :remove_unexpected
-  @@remove_unexpected = true
+  @@remove_unexpected = false
   
   # How to validate parameters
   mattr_accessor :type_validations

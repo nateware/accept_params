@@ -34,47 +34,50 @@ module AcceptParams
       else
         @name = name.to_s
       end
-      
+
       # This is undocumented, and specific to SCEA
       if @options.has_key? :to_id
         klass = @options[:to_id]
         @options[:process] = Proc.new{|v| klass.to_id(v)}
         @options[:to] = "#{@name}_id"
-      end    
+      end
     end
     
     # Allow nesting
     def namespace(name, &block)
       raise ArgumentError, "Missing block to param namespace declaration" unless block_given?
-      child = ParamRules.new(settings, :hash, name, {:required => true}, self)
+      child = ParamRules.new(settings, :namespace, name, {:required => false}, self)  # block not required per se
       yield child
       @children << child
     end
-    
+
     # Ala pretty migrations
     def string(name, options={})
-      add_child(:string, name, options)
+      param(:string, name, options)
     end
     def integer(name, options={})
-      add_child(:integer, name, options)
+      param(:integer, name, options)
     end
     def float(name, options={})
-      add_child(:float, name, options)
+      param(:float, name, options)
     end
     def decimal(name, options={})
-      add_child(:decimal, name, options)
+      param(:decimal, name, options)
     end
     def boolean(name, options={})
-      add_child(:boolean, name, options)
+      param(:boolean, name, options)
     end
     def datetime(name, options={})
-      add_child(:datetime, name, options)
+      param(:datetime, name, options)
     end
     def text(name, options={})
-      add_child(:text, name, options)
+      param(:text, name, options)
     end
     def binary(name, options={})
-      add_child(:binary, name, options)
+      param(:binary, name, options)
+    end
+    def array(name, options={})
+      param(:array, name, options)
     end
     
     # This is a shortcut for declaring elements that represent ActiveRecord
@@ -83,10 +86,10 @@ module AcceptParams
     # attribute ignore_columns, which is described at the top of this page).
     def model(klass)
       unless is_model?(klass)
-        raise ArgumentError, "you must supply an ActiveRecord class to the model method"
+        raise ArgumentError, "Must supply an ActiveRecord class to the model method"
       end
       klass.columns.each do |c|
-        add_child(c.type, c.name, :required => c.null, :limit => c.limit) unless ignore_column?(c)
+        param(c.type, c.name, :required => c.null, :limit => c.limit) unless ignore_column?(c)
       end
     end
 
@@ -96,7 +99,7 @@ module AcceptParams
     end
     
     def namespace?
-      type == :hash
+      type == :namespace
     end
     
     # Returns the full name of this parameter as it would be accessed in the
@@ -130,6 +133,11 @@ module AcceptParams
         unexpected_keys.each{|k| params.delete(k)} if settings[:remove_unexpected]
       end
     end
+    
+    # Create a new param
+    def param(type, name, options)
+      @children << ParamRules.new(settings, type.to_sym, name, options, self)
+    end
 
     private
     
@@ -144,12 +152,6 @@ module AcceptParams
         klass.ancestors.detect {|a| a == ActiveRecord::Base}
     end
     
-    # Create a new child. The first argument is boolean and says whether the
-    # child is required (must_have) or not (may_have).
-    def add_child(type, name, options)
-      @children << ParamRules.new(settings, type, name, options, self)
-    end
-   
     # Remove the given children. 
     def remove_child(*names)
       names.each do |name|
@@ -163,7 +165,14 @@ module AcceptParams
     def validate_children(params)
       recognized_keys = []
       children.each do |child|
-        if params.has_key?(child.name)
+        #puts ">>>>>>>>>> child.name = #{child.canonical_name}"
+        if child.namespace?
+          recognized_keys << child.name
+          # NOTE: Can't get fancy and do this ||= w/i the below func call, due to 
+          # an apparent oddity of Ruby's scoping for method args
+          params[child.name] ||= HashWithIndifferentAccess.new   # create holder for subelements if missing
+          validate_child(child, params[child.name]) 
+        elsif params.has_key?(child.name)
           recognized_keys << child.name
           validate_child(child, params[child.name])
           validate_value_and_type_cast!(child, params)
@@ -177,13 +186,16 @@ module AcceptParams
 
         # Finally, handle key renaming
         if new_name = child.options[:to]
-          if params.has_key? new_name
-            raise UnexpectedParam, "Request included destination parameter '#{new_name}'"
-          end
+          # Removed this because it causes havok with :to_id and will_paginate.
+          # Not needed anyways, since we just overwrite it right afterwards.
+          # if params.has_key? new_name
+          #   raise UnexpectedParam, "Request included destination parameter '#{new_name}'"
+          # end
           params[new_name] = params.delete(child.name)
           recognized_keys << new_name.to_s
         end  
       end
+      #puts "!!!!!!!!! DONE: params[:filters] = #{params[:filters].inspect}; #{params[:filters].object_id}"
       recognized_keys
     end
     
@@ -196,24 +208,38 @@ module AcceptParams
         end
       else
         if value.is_a?(Hash)
+          #puts "????????? NEST: #{value.inspect} (#{value.object_id})"
           child.validate(value)  # recurse
         else
-          raise InvalidParamValue, "Expected #{child.canonical_name} to be a nested hash"
+          raise InvalidParamValue, "Expected parameter '#{child.canonical_name}' to be a nested hash"
         end
-      end      
-      
+      end
     end
-    
+
     def validate_value_and_type_cast!(child, params)
       return true if child.namespace?
-      value = params[child.name]
-      if value.nil? # || value == ""
+      value = params[child.name] # we may be recursive, eg, params[:filters][:player_creation_type]
+      #puts "@@@@@@@@@@@@ VALUE(#{child.canonical_name}) = #{value.inspect}"
+
+      # XXX Special catch for pagination with :to_id fields, since "player_creation_type"
+      # becomes player_creation_type_id (with the correct value) on subsequent pages
+      #puts "@@@ #{child.canonical_name}: if #{value.nil?} and #{options[:to]} and #{params[options[:to]]} (#{options.inspect})"
+      if value.nil? and to = child.options[:to] and params[to]
+        value = params[to]
+      elsif value.nil?
         if child.options.has_key?(:default)
           if child.options[:default].is_a? Proc
-            value = child.options[:default].call
+            begin
+              value = child.options[:default].call
+            rescue Exception => e
+              # Rebrand exceptions so top-level can catch
+              raise InvalidParamValue, e.to_s
+            end
           else
             value = child.options[:default]
           end
+        elsif child.required?
+          raise InvalidParamValue, "Value for parameter '#{child.canonical_name}' is null or missing"
         else
           # If no default, that means it's *really* optional
           return true
@@ -222,7 +248,19 @@ module AcceptParams
         # Only call the process method if we're *not* using a default value
         # Must *NOT* type cast this value, or else it will be cast back to the
         # input value type (eg, string), rather than the :to_id type (integer)
-        value = child.options[:process].call(value)
+        begin
+          #puts ">>>>>>> #{value.inspect}, #{params.inspect}"
+          value = child.options[:process].call(value)
+          #puts ">>>>>>> #{value.inspect}, #{params.inspect}"
+        rescue Exception => e
+          # Rebrand exceptions so top-level can catch
+          raise InvalidParamValue, e.to_s
+        end
+      elsif child.type == :array
+        value = value.split(',') if value.is_a? String  # accept comma,delimited,string also
+        unless value.is_a? Array
+          raise InvalidParamType, "Value for parameter '#{child.canonical_name}' (#{value}) is of the wrong type (expected #{child.type})"
+        end
       else
         # Validate and typecast non-defaults; assume the programmer was smart enough
         # to say :default => 4 rather than :default => "4" if using defaults
@@ -236,6 +274,7 @@ module AcceptParams
 
       # Overwrite our original value, to make params safe
       params[child.name] = value
+      #puts "+++++++++ #{child.canonical_name}: params[#{child.name}] = #{value.inspect} (#{params.object_id})"
     end
 
     def type_cast_value(type, value)
@@ -247,12 +286,22 @@ module AcceptParams
       when :string
         value.to_s
       when :boolean
-        case value
-        when /^(1|true|TRUE|T|Y)$/
+        if value.is_a? TrueClass
           true
-        when /^(0|false|FALSE|F|N)$/
+        elsif value.is_a? FalseClass
           false
+        else
+          case value
+          when /^(1|true|TRUE|T|Y)$/
+            true
+          when /^(0|false|FALSE|F|N)$/
+            false
+          else
+            raise InvalidParamValue, "Could not typecast boolean to appropriate value"
+          end
         end
+      when :binary, :array
+        value
       else
         value.to_s
       end
@@ -285,7 +334,7 @@ module AcceptParams
 
       # Finally, if :null => false, this is a special sanity check that it can't be empty
       # This is designed to catch cases where the default/etc are null; it's a double-condom for programmers
-      if value.nil? && options.has_key?(:null) && options[:null] == false
+      if (value.nil? || value == "") && (options.has_key?(:null) && options[:null] == false)
         raise InvalidParamValue, "Value for parameter '#{name}' is null or missing"
       end
     end
