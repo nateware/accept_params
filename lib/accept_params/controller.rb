@@ -24,9 +24,9 @@ module AcceptParams
     # and log any RequestError exceptions that get raised.
     def safe_assertion
       yield
-    rescue ParamError
-      logger.error "Bad request: #{$!}" 
-      raise        
+    rescue ParamError => e
+      logger.error "Bad request: #{e}" if respond_to?(:logger)
+      raise
     end    
     
     # This is what you have to do to mixin class methods (eg, self.whatever). sucks.

@@ -6,40 +6,38 @@ module AcceptParams
 
     # TODO: Convert this to a hash of options.
     def initialize(settings, type=nil, name=nil, options={}, parent=nil) # :nodoc:
-      if (name.nil? && !parent.nil?) || (parent.nil? && !name.nil?)
-        raise ArgumentError, "parent and name must both be either nil or not nil"
-      end
-      if (name.nil? && !type.nil?) || (type.nil? && !name.nil?)
-        raise ArgumentError, "type and name must both be either nil or not nil"
-      end
-      @type     = type
-      @parent   = parent
       @children = []
       @options  = options
-      
-      # Set default options which control behavior
-      @settings = {
-        :ignore_unexpected => AcceptParams.ignore_unexpected,
-        :remove_unexpected => AcceptParams.remove_unexpected,
-        :ignore_params     => AcceptParams.ignore_params,
-        :ignore_columns    => AcceptParams.ignore_columns,
-      }.merge(settings)
-
       if name.nil?
-        @name = nil
-      elsif is_model?(name)
-        klass = name
-        @name = klass.to_s.underscore
-        is_a klass
+        @name = @type = @parent = nil
+        # Set default options which control behavior
+        @settings = {
+          :ignore_unexpected => AcceptParams.ignore_unexpected,
+          :remove_unexpected => AcceptParams.remove_unexpected,
+          :ignore_params     => AcceptParams.ignore_params,
+          :ignore_columns    => AcceptParams.ignore_columns,
+        }.merge(settings)
       else
-        @name = name.to_s
-      end
+        if parent.nil? or type.nil?
+          raise ArgumentError, "name, type, and parent must all be either nil or not nil"
+        end
+        @type   = type.to_sym
+        @parent = parent
 
-      # This is undocumented, and specific to SCEA
-      if @options.has_key? :to_id
-        klass = @options[:to_id]
-        @options[:process] = Proc.new{|v| klass.to_id(v)}
-        @options[:to] = "#{@name}_id"
+        if is_model?(name)
+          klass = name
+          @name = klass.to_s.underscore.to_sym
+          is_a klass
+        else
+          @name = name.to_sym
+        end
+        
+        # This is undocumented, and specific to SCEA
+        if @options.has_key? :to_id
+          klass = @options[:to_id]
+          @options[:process] = Proc.new{|v| klass.to_id(v)}
+          @options[:to] = "#{@name}_id"
+        end
       end
     end
     
@@ -136,26 +134,26 @@ module AcceptParams
     
     # Create a new param
     def param(type, name, options)
-      @children << ParamRules.new(settings, type.to_sym, name, options, self)
+      @children << ParamRules.new(settings, type, name, options, self)
     end
 
     private
     
     # Should we ignore this ActiveRecord column? 
     def ignore_column?(column)
-      settings[:ignore_columns].detect { |name| name.to_s == column.name }
+      settings[:ignore_columns].detect { |name| name == column.name }
     end
     
     # Determine if the given class is an ActiveRecord model.
     def is_model?(klass)
       klass.respond_to?(:ancestors) &&
-        klass.ancestors.detect {|a| a == ActiveRecord::Base}
+        klass.ancestors.detect {|a| a == ActiveRecord::Base || a == MongoRecord::Base}
     end
     
     # Remove the given children. 
     def remove_child(*names)
       names.each do |name|
-        children.delete_if { |child| child.name == name.to_s }
+        children.delete_if { |child| child.name == name }
       end          
     end
    
@@ -192,7 +190,7 @@ module AcceptParams
           #   raise UnexpectedParam, "Request included destination parameter '#{new_name}'"
           # end
           params[new_name] = params.delete(child.name)
-          recognized_keys << new_name.to_s
+          recognized_keys << new_name
         end  
       end
       #puts "!!!!!!!!! DONE: params[:filters] = #{params[:filters].inspect}; #{params[:filters].object_id}"

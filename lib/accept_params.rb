@@ -1,4 +1,5 @@
 # AcceptParams
+require 'active_support/core_ext'
 module AcceptParams
   # Exceptions for AcceptParams
   class ParamError < StandardError; end #:nodoc:
@@ -77,5 +78,6 @@ module AcceptParams
     :boolean => /^(1|true|TRUE|T|Y|0|false|FALSE|F|N)$/,
     :datetime => /^[-\d:T\s]+$/,  # "T" is for ISO date formats
   }
-  
 end
+require 'accept_params/controller'
+require 'accept_params/param_rules'
