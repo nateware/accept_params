@@ -110,6 +110,18 @@ describe AcceptParams do
     ctrl.accept_params do |p|
       p.array :users
     end
+
+    ctrl = Controller.new(
+      'users' => [
+        {'username' => 'nate', 'sex' => 'male'},
+        {'username' => 'betty', 'sex' => 'female'}
+      ]
+    )
+    ctrl.accept_params do |p|
+      p.array :users do |u|
+        
+      end
+    end
     
   end
   
