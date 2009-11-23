@@ -105,23 +105,29 @@ describe AcceptParams do
     ctrl.params['per_page'].should == 20
     
     ctrl = Controller.new(
-      'users' => ['one','two','three']
+      'users' => ['one','two','three'],
+      'colors' => 'red,green,blue'
     )
     ctrl.accept_params do |p|
       p.array :users
+      p.array :colors
     end
+    ctrl.params['users'].should == ['one','two','three']
+    ctrl.params['colors'].should == ['red','green','blue']
 
-    ctrl = Controller.new(
-      'users' => [
-        {'username' => 'nate', 'sex' => 'male'},
-        {'username' => 'betty', 'sex' => 'female'}
-      ]
-    )
-    ctrl.accept_params do |p|
-      p.array :users do |u|
-        
-      end
-    end
+    # ctrl = Controller.new(
+    #   'users' => [
+    #     {'username' => 'nate', 'sex' => 'male'},
+    #     {'username' => 'betty', 'sex' => 'female'}
+    #   ]
+    # )
+    # ctrl.accept_params do |p|
+    #   p.array :users do |u|
+    #     puts 'hi'
+    #     u.string :username, :required => true
+    #     u.string :sex, :required => true
+    #   end
+    # end
     
   end
   
