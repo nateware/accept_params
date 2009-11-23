@@ -26,10 +26,10 @@ module AcceptParams
 
         if is_model?(name)
           klass = name
-          @name = klass.to_s.underscore.to_sym
+          @name = klass.to_s.underscore
           is_a klass
         else
-          @name = name.to_sym
+          @name = name.to_s
         end
         
         # This is undocumented, and specific to SCEA
@@ -111,7 +111,7 @@ module AcceptParams
         parent.canonical_name + "[#{name}]" 
       end
     end
-    
+
     # Validate the given parameters against our requirements, raising 
     # exceptions for missing or unexpected parameters.
     def validate(params) #:nodoc:
